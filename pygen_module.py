@@ -15,10 +15,19 @@ def residuals(data_x: np.ndarray, data_y: np.ndarray,
               model: callable or dict = mysin,
               errors: np.ndarray = None,
               *args, **kwargs) -> np.ndarray:
-    try:
-        if model['type'] == 'min':
-            return model['fun'](*params, **kwargs)
-    except Exception:
+    if type(model) == dict:
+        try:
+            if model['type'] == 'min':
+                return model['fun'](*params, **kwargs)
+        except Exception:
+            pass
+        try:
+            if model['type'] == 'resids':
+                chi=np.sum(np.power(model['fun'](*params, **kwargs), 2))
+                return chi
+        except Exception:
+            pass
+    else:
         print("param: ", params)
         if errors is None:
             return np.sum((data_y - model(data_x, *params, **kwargs)) ** 2)
@@ -176,7 +185,7 @@ def pygenfun(data_x, data_y, y_error,
     while inprogress:
         print('STAGE: ', inprogress)
         population_stack.append(population)
-        #for pop in population_stack:
+        # for pop in population_stack:
         #    print(len(pop), pop)
         # __breeding__
         print('start breeding')
@@ -188,7 +197,8 @@ def pygenfun(data_x, data_y, y_error,
         print('selection')
         sorted_population = sorted(breed_population, key=getResid)
         new_population = selection(sorted_population, selection_model, popsize)
-        bestfit_stack.append(new_population[0]['parameter']) # TODO проверить где добавляются лишние члены в предыдущий поп
+        bestfit_stack.append(
+            new_population[0]['parameter'])  # TODO проверить где добавляются лишние члены в предыдущий поп
         # __shuffle__
         print('shuffle')
         np.random.shuffle(new_population)
@@ -203,9 +213,9 @@ def pygenfun(data_x, data_y, y_error,
     # LM optimization
     try:
         if model['type'] == 'min':
-            result_lsq_obj=opt.least_squares(model['fun'],result_gen,method=final_lsq)
-            result_lsq=result_lsq_obj['x']
-            cov=result_lsq_obj['hess_inv']
+            result_lsq_obj = opt.least_squares(model['fun'], result_gen, method=final_lsq)
+            result_lsq = result_lsq_obj['x']
+            cov = result_lsq_obj['hess_inv']
     except Exception:
         print('Curve fitting')
         result_lsq, cov = opt.curve_fit(model, x, y, result_gen, method=final_lsq, **kwargs)
@@ -235,5 +245,3 @@ def pygenfun(data_x, data_y, y_error,
 
     """
     return result_lsq, cov, result_gen, bestfit_stack, population_stack
-
-
