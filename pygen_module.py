@@ -1,6 +1,8 @@
 import numpy as np
 import scipy.optimize as opt
-
+# from pathos.multiprocessing import ProcessingPool as Pool
+from multiprocessing import Pool
+from lmfit import minimize, Parameters
 
 def mysin(x, *params):
     if isinstance(params[0], np.ndarray) or isinstance(params[0], list):
@@ -23,7 +25,7 @@ def residuals(data_x: np.ndarray, data_y: np.ndarray,
             pass
         try:
             if model['type'] == 'resids':
-                chi=np.sum(np.power(model['fun'](*params, **kwargs), 2))
+                chi = np.sum(np.power(model['fun'](*params, **kwargs), 2))
                 return chi
         except Exception:
             pass
@@ -48,6 +50,12 @@ def selection(population: list, kw_string='no', *args) -> list:
     elif kw_string == 'ps':
         # to popsize=args[0]
         return population[0:args[0]]
+
+
+def upgrade_pop(pop, data_x, data_y, model, **kwargs):
+    pop['resid'] = residuals(data_x, data_y, pop['parameter'], model, **kwargs)
+    print(pop['resid'])
+    return pop
 
 
 def breeding(population: list, kw_string: str, data_x, data_y, model, breed_popsize=4, **kwargs) -> list:
@@ -78,16 +86,26 @@ def breeding(population: list, kw_string: str, data_x, data_y, model, breed_pops
         # couple pops (0+1, 2+3...) and make N children
         # around hypercube vertices
         # N -- largest digit in kw_string
-
+        popchild = []
         for i in range(0, popsize - 1, 2):
-            popchild = [dict(
+            siblings = [dict(
                 parameter=[population[i + np.random.randint(0, 1)]['parameter'][par] * np.random.normal(1, 0.15)
                            for par in range(nparam)],
                 resid=0)
                 for j in range(0, nchild)]
-            for pop in popchild:
-                pop['resid'] = residuals(data_x, data_y, pop['parameter'], model, **kwargs)
-            population.extend(popchild)
+            popchild.extend(siblings)
+        print(len(popchild))
+
+        print("Here!")
+        pool = Pool(3)
+        pops_with_data_and_model = [(pop, data_x, data_y, model) for pop in popchild]
+        newpopchild = pool.starmap(upgrade_pop, pops_with_data_and_model)
+        """for pop in popchild:
+            pop['resid'] = residuals(data_x, data_y, pop['parameter'], model, **kwargs)
+        population.extend(popchild)
+        """
+        population.extend((newpopchild))
+
     elif 'e' in breeding_keywords:
         # Exponential chance to pair
         # makes approximately kwrargs['children'] or N
@@ -147,6 +165,7 @@ def breeding(population: list, kw_string: str, data_x, data_y, model, breed_pops
             for pop in popchild:
                 pop['resid'] = residuals(data_x, data_y, pop['parameter'], model, **kwargs)
             population.extend(popchild)
+
     return population
 
 
@@ -176,8 +195,13 @@ def pygenfun(data_x, data_y, y_error,
         resid=0)
         for j in range(popsize)]
     # __calculating residuals__
-    for pop in population:
-        pop['resid'] = residuals(x, y, pop['parameter'], model, **kwargs)
+
+    #for pop in population:
+    #    pop['resid'] = residuals(x, y, pop['parameter'], model, **kwargs)
+    pool = Pool(3)
+    pops_with_data_and_model = [(pop, data_x, data_y, model) for pop in population]
+    population = pool.starmap(upgrade_pop, pops_with_data_and_model)
+
 
     bestfit_stack.append(sorted(population, key=getResid)[0]['parameter'])
     # print(bestfit_stack)
@@ -197,8 +221,7 @@ def pygenfun(data_x, data_y, y_error,
         print('selection')
         sorted_population = sorted(breed_population, key=getResid)
         new_population = selection(sorted_population, selection_model, popsize)
-        bestfit_stack.append(
-            new_population[0]['parameter'])  # TODO проверить где добавляются лишние члены в предыдущий поп
+        bestfit_stack.append(new_population[0]['parameter'])
         # __shuffle__
         print('shuffle')
         np.random.shuffle(new_population)
@@ -211,18 +234,39 @@ def pygenfun(data_x, data_y, y_error,
     print('PyGen parameters: ', result_gen, residuals(x, y, result_gen, model, **kwargs))
 
     # LM optimization
-    try:
+    print('Curve fitting')
+    if type(model) == dict:
         if model['type'] == 'min':
+            print("NOT IMPLEMENTED!")
+            quit("Not yet implemented")
             result_lsq_obj = opt.least_squares(model['fun'], result_gen, method=final_lsq)
             result_lsq = result_lsq_obj['x']
             cov = result_lsq_obj['hess_inv']
-    except Exception:
-        print('Curve fitting')
-        result_lsq, cov = opt.curve_fit(model, x, y, result_gen, method=final_lsq, **kwargs)
+        if model['type'] == 'resids':
+            #parameters_list=tuple(('par'+str(i), result_gen[i]) for i in range(len(result_gen)))
+            #fancy_parameters=Parameters()
+            ##map(fancy_parameters.add, parameters_list)
+            #fancy_parameters.add_many(*parameters_list)
+            #result_lsq_obj = minimize(model['fun'], fancy_parameters)
+            #result_lsq, cov = result_lsq_obj.params.valuesdict().values, result_lsq_obj.covar
+
+            #result_lsq_obj = opt.leastsq(model['fun'], result_gen, full_output=True)
+            result_lsq_obj = opt.least_squares(model['fun'], np.array(result_gen), method='lm', verbose=True)
+            print(type(result_lsq_obj))
+            print(result_lsq_obj.values)
+            result_lsq = result_lsq_obj[0]
+            cov = result_lsq_obj[1]
+            print(result_lsq_obj)
+            a=opt.OptimizeResult
+            print(a.x)
+            print(a.hess_inv)
+    else:
+        result_lsq, cov = opt.curve_fit(model, x, y, result_gen, method=final_lsq, verbose=1, **kwargs)
 
     print('Least-squares parameters: ', result_lsq, '\u00B1',
           [np.sqrt(np.diag(cov))],
           residuals(x, y, result_lsq, model, **kwargs))
+
     print(cov)
 
     return result_lsq, cov, result_gen, bestfit_stack, population_stack
