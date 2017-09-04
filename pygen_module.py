@@ -58,7 +58,9 @@ def upgrade_pop(pop, data_x, data_y, model, **kwargs):
     return pop
 
 
-def breeding(population: list, kw_string: str, data_x, data_y, model, breed_popsize=4, **kwargs) -> list:
+def breeding(population: list, kw_string: str,
+             data_x, data_y, model,
+             breed_popsize=4, number_of_threads=1, **kwargs) -> list:
     """
     Breeds the population for genetic algorithm and calculates new residuals
 
@@ -97,7 +99,7 @@ def breeding(population: list, kw_string: str, data_x, data_y, model, breed_pops
         print(len(popchild))
 
         print("Here!")
-        pool = Pool(3)
+        pool = Pool(number_of_threads)
         pops_with_data_and_model = [(pop, data_x, data_y, model) for pop in popchild]
         newpopchild = pool.starmap(upgrade_pop, pops_with_data_and_model)
         """for pop in popchild:
@@ -175,7 +177,9 @@ def pygenfun(data_x, data_y, y_error,
              model, param_space,
              popsize=10, breeding_model='2p',
              selection_model='ps',
-             final_lsq='lm', *args, **kwargs):
+             final_lsq='lm', number_of_threads = 1,
+             *args, **kwargs):
+
     p0 = np.array([2.5, 1.3])
     x = data_x
     y = data_y
@@ -198,7 +202,7 @@ def pygenfun(data_x, data_y, y_error,
 
     #for pop in population:
     #    pop['resid'] = residuals(x, y, pop['parameter'], model, **kwargs)
-    pool = Pool(3)
+    pool = Pool(number_of_threads)
     pops_with_data_and_model = [(pop, data_x, data_y, model) for pop in population]
     population = pool.starmap(upgrade_pop, pops_with_data_and_model)
 
@@ -214,7 +218,9 @@ def pygenfun(data_x, data_y, y_error,
         # __breeding__
         print('start breeding')
         print(len(population))
-        breed_population = breeding(population, breeding_model, x, y, model, breed_popsize=popsize, **kwargs)
+        breed_population = breeding(population, breeding_model,
+                                    x, y, model, breed_popsize=popsize,
+                                    number_of_threads = number_of_threads, **kwargs)
         print(len(population))
         print(len(breed_population))
         # __selection__
@@ -235,40 +241,46 @@ def pygenfun(data_x, data_y, y_error,
 
     # LM optimization
     print('Curve fitting')
-    if type(model) == dict:
-        if model['type'] == 'min':
-            print("NOT IMPLEMENTED!")
-            quit("Not yet implemented")
-            result_lsq_obj = opt.least_squares(model['fun'], result_gen, method=final_lsq)
-            result_lsq = result_lsq_obj['x']
-            cov = result_lsq_obj['hess_inv']
-        if model['type'] == 'resids':
-            #parameters_list=tuple(('par'+str(i), result_gen[i]) for i in range(len(result_gen)))
-            #fancy_parameters=Parameters()
-            ##map(fancy_parameters.add, parameters_list)
-            #fancy_parameters.add_many(*parameters_list)
-            #result_lsq_obj = minimize(model['fun'], fancy_parameters)
-            #result_lsq, cov = result_lsq_obj.params.valuesdict().values, result_lsq_obj.covar
+    try:
+        if type(model) == dict:
+            if model['type'] == 'min':
+                print("NOT IMPLEMENTED!")
+                quit("Not yet implemented")
+                result_lsq_obj = opt.least_squares(model['fun'], result_gen, method=final_lsq)
+                result_lsq = result_lsq_obj['x']
+                cov = result_lsq_obj['hess_inv']
+            if model['type'] == 'resids':
+                # parameters_list=tuple(('par'+str(i), result_gen[i]) for i in range(len(result_gen)))
+                # fancy_parameters=Parameters()
+                ##map(fancy_parameters.add, parameters_list)
+                # fancy_parameters.add_many(*parameters_list)
+                # result_lsq_obj = minimize(model['fun'], fancy_parameters)
+                # result_lsq, cov = result_lsq_obj.params.valuesdict().values, result_lsq_obj.covar
 
-            #result_lsq_obj = opt.leastsq(model['fun'], result_gen, full_output=True)
-            result_lsq_obj = opt.least_squares(model['fun'], np.array(result_gen), method='lm', verbose=True)
-            print(type(result_lsq_obj))
-            print(result_lsq_obj.values)
-            result_lsq = result_lsq_obj[0]
-            cov = result_lsq_obj[1]
-            print(result_lsq_obj)
-            a=opt.OptimizeResult
-            print(a.x)
-            print(a.hess_inv)
-    else:
-        result_lsq, cov = opt.curve_fit(model, x, y, result_gen, method=final_lsq, verbose=1, **kwargs)
+                # result_lsq_obj = opt.leastsq(model['fun'], result_gen, full_output=True)
+                result_lsq_obj = opt.least_squares(model['fun'], np.array(result_gen), method='lm', verbose=2)
+                print(type(result_lsq_obj))
+                print(result_lsq_obj.values)
+                resut_lsq = result_lsq_obj[0]
+                cov = result_lsq_obj[1]
+                print(result_lsq_obj)
+                a = opt.OptimizeResult
+                print(a.x)
+                print(a.hess_inv)
+        else:
+            result_lsq, cov = opt.curve_fit(model, x, y, result_gen, method=final_lsq, verbose=1, **kwargs)
 
-    print('Least-squares parameters: ', result_lsq, '\u00B1',
-          [np.sqrt(np.diag(cov))],
-          residuals(x, y, result_lsq, model, **kwargs))
+        print('Least-squares parameters: ', result_lsq, '\u00B1',
+              [np.sqrt(np.diag(cov))],
+              residuals(x, y, result_lsq, model, **kwargs))
 
-    print(cov)
-
+        print(cov)
+    except:
+        print('WARNING! Least-squares crashed!')
+        print('Use gen parameters instead')
+        print('(may slow the mcmc process down)')
+        result_lsq = result_gen
+        cov = np.eye(len(result_gen))
     return result_lsq, cov, result_gen, bestfit_stack, population_stack
 
     """
